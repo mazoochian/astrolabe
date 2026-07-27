@@ -1,0 +1,38 @@
+{
+  "name": "astrolabe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinxi dev",
+    "build": "vinxi build",
+    "start": "vinxi start",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@solidjs/meta": "^0.29.4",
+    "@solidjs/router": "^0.15.0",
+    "@solidjs/start": "^1.0.0",
+    "clsx": "^2.1.1",
+    "lucide-solid": "^0.575.0",
+    "solid-js": "^1.9.0",
+    "tailwind-merge": "^3.5.0",
+    "tw-animate-css": "^1.3.4",
+    "vinxi": "^0.5.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/node": "^22.16.5",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^9.32.0",
+    "eslint-plugin-solid": "^0.14.5",
+    "prettier": "^3.7.3",
+    "prettier-plugin-organize-imports": "^4.2.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.16",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

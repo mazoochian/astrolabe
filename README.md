@@ -6,7 +6,7 @@ This is a from-scratch SolidJS remake of a React/Loveable prototype ([nebula-dom
 
 ## Prerequisites
 
-- Node.js 20+ (developed against Node 22)
+- Node.js 22.5+ (uses the built-in SQLite module)
 - npm
 
 ## Setup
@@ -30,9 +30,11 @@ Email: nadia@astrolabe.io
 Password: astrolabe-demo-2026
 ```
 
-Override the credentials and cookie-signing secret with `ASTROLABE_DEMO_EMAIL`,
-`ASTROLABE_DEMO_PASSWORD`, and `ASTROLABE_SESSION_SECRET`. Always set a strong,
-private `ASTROLABE_SESSION_SECRET` in production.
+On first startup, these credentials seed a SQLite user record with a scrypt-hashed
+password. Override them with `ASTROLABE_DEMO_EMAIL` and
+`ASTROLABE_DEMO_PASSWORD`. Configure the database location with
+`ASTROLABE_DATABASE_PATH` (defaults to `data/astrolabe.db`) and always set a
+strong, private `ASTROLABE_SESSION_SECRET` in production.
 
 ## Production build
 
@@ -83,6 +85,7 @@ src/
   lib/
     mock-data.ts             All mock data + types (zones, DNS records, certs, members, tokens)
     session.ts               Server-side credential checks and signed session tokens
+    user-store.ts            SQLite users and scrypt password verification
     utils.ts                  `cn()` class-merging helper
 ```
 

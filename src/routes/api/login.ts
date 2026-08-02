@@ -1,10 +1,6 @@
 import { getCookie, readBody, setCookie } from "vinxi/http";
-import {
-  createSessionToken,
-  SESSION_COOKIE_NAME,
-  validateCredentials,
-  verifySessionToken,
-} from "~/lib/session";
+import { authenticateUser, getUserFromSession } from "~/lib/auth";
+import { createSessionToken, SESSION_COOKIE_NAME } from "~/lib/session";
 
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
@@ -28,12 +24,13 @@ export async function POST() {
     return json({ error: "Invalid email or password." }, 401);
   }
 
-  if (!validateCredentials(email, password)) {
+  const user = authenticateUser(email, password);
+  if (!user) {
     return json({ error: "Invalid email or password." }, 401);
   }
 
   const expiresAt = Date.now() + SESSION_DURATION_MS;
-  const token = createSessionToken(email, expiresAt);
+  const token = createSessionToken(user.id, user.email, expiresAt);
 
   setCookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -43,7 +40,7 @@ export async function POST() {
     expires: new Date(expiresAt),
   });
 
-  return json({ email, redirect: "/dashboard" });
+  return json({ email: user.email, redirect: "/dashboard" });
 }
 
 export async function GET() {
@@ -53,13 +50,13 @@ export async function GET() {
     return json({ authenticated: false }, 200);
   }
 
-  const session = verifySessionToken(token);
+  const user = getUserFromSession(token);
 
-  if (!session) {
+  if (!user) {
     return json({ authenticated: false }, 200);
   }
 
-  return json({ authenticated: true, email: session.email }, 200);
+  return json({ authenticated: true, email: user.email }, 200);
 }
 
 function json(data: unknown, status: number = 200) {

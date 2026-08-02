@@ -12,15 +12,16 @@ const requireSession = query(async () => {
   "use server";
 
   const { getCookie } = await import("vinxi/http");
-  const { SESSION_COOKIE_NAME, verifySessionToken } = await import("~/lib/session");
+  const { getUserFromSession } = await import("~/lib/auth");
+  const { SESSION_COOKIE_NAME } = await import("~/lib/session");
   const token = getCookie(SESSION_COOKIE_NAME);
-  const session = token ? verifySessionToken(token) : null;
+  const user = token ? getUserFromSession(token) : null;
 
-  if (!session) {
+  if (!user) {
     throw redirect("/");
   }
 
-  return { email: session.email };
+  return user;
 }, "authenticated-session");
 
 export const route = {

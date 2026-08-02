@@ -51,6 +51,9 @@ npm run lint     # ESLint (flat config, solid + typescript-eslint rules)
 npm run format    # Prettier, writes in place
 ```
 
+GitHub Actions runs the test, lint, and production-build checks for every pull
+request and every push to `main`.
+
 ## Project structure
 
 ```

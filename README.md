@@ -46,6 +46,7 @@ npm run start
 ## Linting & formatting
 
 ```bash
+npm test         # Node test runner (session and authentication coverage)
 npm run lint     # ESLint (flat config, solid + typescript-eslint rules)
 npm run format    # Prettier, writes in place
 ```
@@ -86,5 +87,5 @@ Routes under `(app)/` are grouped by [SolidStart's route-group convention](https
 
 ## Notes
 
-- Application routes verify the HTTP-only session through `/api/login` before rendering.
+- Application routes verify the HTTP-only session on the server before rendering.
 - Theme preference persists to `localStorage` under the `astrolabe-theme` key.

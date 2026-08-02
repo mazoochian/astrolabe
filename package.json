@@ -6,6 +6,7 @@
     "dev": "vinxi dev",
     "build": "vinxi build",
     "start": "vinxi start",
+    "test": "node --experimental-strip-types --test src/**/*.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

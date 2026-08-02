@@ -1,35 +1,83 @@
 import { KeyRound, Mail, Plus, ShieldHalf, Trash2, UserPlus } from "lucide-solid";
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { PageHeader } from "~/components/page-header";
 import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { members, tokens, type Member, type Token } from "~/lib/mock-data";
+import { memberRoles as roles, type ApiToken, type Member } from "~/lib/domain";
 import { cn } from "~/lib/utils";
 
-const roles = ["Super Administrator", "DNS Editor", "SSL Manager", "Read Only"] as const;
 const tabs = ["members", "tokens"] as const;
 
 export default function AccessPage() {
   const [tab, setTab] = createSignal<(typeof tabs)[number]>("members");
-  const [team, setTeam] = createSignal<Member[]>(members);
-  const [keys, setKeys] = createSignal<Token[]>(tokens);
+  const [team, setTeam] = createSignal<Member[]>([]);
+  const [keys, setKeys] = createSignal<ApiToken[]>([]);
   const [email, setEmail] = createSignal("");
   const [role, setRole] = createSignal<(typeof roles)[number]>(roles[1]);
+  const [error, setError] = createSignal("");
 
-  const invite = () => {
+  onMount(async () => {
+    try {
+      const data = await request<{ members: Member[]; tokens: ApiToken[] }>("/api/access");
+      setTeam(data.members);
+      setKeys(data.tokens);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load access entries.");
+    }
+  });
+
+  const invite = async () => {
     if (!email().trim()) return;
-    setTeam((t) => [
-      ...t,
-      {
-        id: crypto.randomUUID(),
-        name: email().split("@")[0],
-        email: email().trim(),
-        role: role(),
-        scope: "astrolabe.io",
-      },
-    ]);
-    setEmail("");
+    try {
+      const data = await request<{ member: Member }>("/api/access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "member",
+          email: email(),
+          role: role(),
+          scope: "astrolabe.io",
+        }),
+      });
+      setTeam((members) => [...members, data.member]);
+      setEmail("");
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to invite the member.");
+    }
+  };
+
+  const createToken = async () => {
+    try {
+      const data = await request<{ token: ApiToken }>("/api/access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "token" }),
+      });
+      setKeys((tokens) => [data.token, ...tokens]);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create the token.");
+    }
+  };
+
+  const remove = async (kind: "member" | "token", id: string) => {
+    try {
+      await request("/api/access", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, id }),
+      });
+      if (kind === "member") {
+        setTeam((items) => items.filter((item) => item.id !== id));
+      } else {
+        setKeys((items) => items.filter((item) => item.id !== id));
+      }
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to remove the access entry.");
+    }
   };
 
   return (
@@ -56,6 +104,10 @@ export default function AccessPage() {
         }
       />
 
+      <Show when={error()}>
+        <div class="neo-inset rounded-xl px-4 py-3 text-sm text-destructive">{error()}</div>
+      </Show>
+
       <Show
         when={tab() === "members"}
         fallback={
@@ -72,20 +124,7 @@ export default function AccessPage() {
                   </p>
                 </div>
               </div>
-              <Button
-                onClick={() =>
-                  setKeys((k) => [
-                    {
-                      id: crypto.randomUUID(),
-                      name: `token-${k.length + 1}`,
-                      permissions: "Zone:Read",
-                      lastUsed: "Never",
-                      expires: "90 days",
-                    },
-                    ...k,
-                  ])
-                }
-              >
+              <Button onClick={createToken}>
                 <Plus class="size-4" />
                 Create token
               </Button>
@@ -114,7 +153,7 @@ export default function AccessPage() {
                           <Button
                             variant="icon"
                             size="icon-sm"
-                            onClick={() => setKeys((k) => k.filter((x) => x.id !== t.id))}
+                            onClick={() => remove("token", t.id)}
                             aria-label={`Revoke ${t.name}`}
                             class="text-destructive"
                           >
@@ -194,7 +233,7 @@ export default function AccessPage() {
                       <Button
                         variant="icon"
                         size="icon-sm"
-                        onClick={() => setTeam((t) => t.filter((x) => x.id !== m.id))}
+                        onClick={() => remove("member", m.id)}
                         aria-label={`Remove ${m.name}`}
                         class="text-destructive"
                       >
@@ -210,4 +249,12 @@ export default function AccessPage() {
       </Show>
     </>
   );
+}
+
+async function request<T = unknown>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (response.status === 204) return undefined as T;
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(data.error ?? "The request failed.");
+  return data;
 }

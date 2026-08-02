@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Certificate, DnsRecord, DnsRecordInput, Zone } from "~/lib/domain";
+import type { ApiToken, Certificate, DnsRecord, DnsRecordInput, Member, Zone } from "~/lib/domain";
 
 type ZoneRow = { id: string; name: string; status: Zone["status"] };
 type DnsRecordRow = {
@@ -21,6 +21,14 @@ type CertificateRow = {
   authority: string;
   type: string;
   status: Certificate["status"];
+  expires: string;
+};
+type MemberRow = { id: string; name: string; email: string; role: Member["role"]; scope: string };
+type TokenRow = {
+  id: string;
+  name: string;
+  permissions: string;
+  last_used: string;
   expires: string;
 };
 
@@ -104,6 +112,26 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
       expires TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS members (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, email)
+    );
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      permissions TEXT NOT NULL,
+      last_used TEXT NOT NULL,
+      expires TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS access_seeded (user_id TEXT PRIMARY KEY);
   `);
 
   const toZone = (row: ZoneRow): Zone => ({ ...row });
@@ -123,6 +151,14 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
     authority: row.authority,
     type: row.type,
     status: row.status,
+    expires: row.expires,
+  });
+  const toMember = (row: MemberRow): Member => ({ ...row });
+  const toToken = (row: TokenRow): ApiToken => ({
+    id: row.id,
+    name: row.name,
+    permissions: row.permissions,
+    lastUsed: row.last_used,
     expires: row.expires,
   });
 
@@ -175,6 +211,31 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
         Number(record.proxied),
       );
     }
+  };
+
+  const seedAccessForUser = (userId: string) => {
+    if (database.prepare("SELECT user_id FROM access_seeded WHERE user_id = ?").get(userId)) return;
+    const insertMember = database.prepare(
+      "INSERT INTO members (id, user_id, name, email, role, scope) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const insertToken = database.prepare(
+      `INSERT INTO api_tokens (id, user_id, name, permissions, last_used, expires)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const members = [
+      ["Nadia Farrell", "nadia@astrolabe.io", "Super Administrator", "All zones"],
+      ["Ito Mbeki", "ito@astrolabe.io", "DNS Editor", "astrolabe.io"],
+      ["Priya Raman", "priya@astrolabe.io", "SSL Manager", "astrolabe.io"],
+      ["Casper Lund", "casper@partner.dev", "Read Only", "orbit-labs.dev"],
+    ] as const;
+    for (const member of members) insertMember.run(randomUUID(), userId, ...member);
+    const tokens = [
+      ["ci-deploy-bot", "DNS:Edit", "12 minutes ago", "30 Nov 2026"],
+      ["terraform-prod", "Zone:Read, DNS:Edit", "4 hours ago", "Never"],
+      ["audit-readonly", "Zone:Read", "6 days ago", "01 Aug 2026"],
+    ] as const;
+    for (const token of tokens) insertToken.run(randomUUID(), userId, ...token);
+    database.prepare("INSERT INTO access_seeded (user_id) VALUES (?)").run(userId);
   };
 
   return {
@@ -282,6 +343,81 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
         certificate.expires,
       );
       return certificate;
+    },
+
+    listMembers(userId: string): Member[] {
+      seedAccessForUser(userId);
+      return (
+        database
+          .prepare(
+            "SELECT id, name, email, role, scope FROM members WHERE user_id = ? ORDER BY created_at",
+          )
+          .all(userId) as MemberRow[]
+      ).map(toMember);
+    },
+
+    createMember(userId: string, email: string, role: Member["role"], scope: string): Member {
+      seedAccessForUser(userId);
+      const member: Member = {
+        id: randomUUID(),
+        name: email.split("@")[0],
+        email: email.toLowerCase(),
+        role,
+        scope,
+      };
+      database
+        .prepare(
+          "INSERT INTO members (id, user_id, name, email, role, scope) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(member.id, userId, member.name, member.email, member.role, member.scope);
+      return member;
+    },
+
+    deleteMember(userId: string, id: string): boolean {
+      return (
+        database.prepare("DELETE FROM members WHERE id = ? AND user_id = ?").run(id, userId)
+          .changes > 0
+      );
+    },
+
+    listTokens(userId: string): ApiToken[] {
+      seedAccessForUser(userId);
+      return (
+        database
+          .prepare(
+            "SELECT id, name, permissions, last_used, expires FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC",
+          )
+          .all(userId) as TokenRow[]
+      ).map(toToken);
+    },
+
+    createToken(userId: string): ApiToken {
+      seedAccessForUser(userId);
+      const count = (
+        database
+          .prepare("SELECT COUNT(*) AS count FROM api_tokens WHERE user_id = ?")
+          .get(userId) as { count: number }
+      ).count;
+      const token: ApiToken = {
+        id: randomUUID(),
+        name: `token-${count + 1}`,
+        permissions: "Zone:Read",
+        lastUsed: "Never",
+        expires: "90 days",
+      };
+      database
+        .prepare(
+          "INSERT INTO api_tokens (id, user_id, name, permissions, last_used, expires) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(token.id, userId, token.name, token.permissions, token.lastUsed, token.expires);
+      return token;
+    },
+
+    deleteToken(userId: string, id: string): boolean {
+      return (
+        database.prepare("DELETE FROM api_tokens WHERE id = ? AND user_id = ?").run(id, userId)
+          .changes > 0
+      );
     },
 
     close(): void {

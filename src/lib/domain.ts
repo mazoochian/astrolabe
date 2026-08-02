@@ -27,3 +27,26 @@ export type Certificate = {
   status: "Active" | "Issuing";
   expires: string;
 };
+
+export const memberRoles = [
+  "Super Administrator",
+  "DNS Editor",
+  "SSL Manager",
+  "Read Only",
+] as const;
+
+export type Member = {
+  id: string;
+  name: string;
+  email: string;
+  role: (typeof memberRoles)[number];
+  scope: string;
+};
+
+export type ApiToken = {
+  id: string;
+  name: string;
+  permissions: string;
+  lastUsed: string;
+  expires: string;
+};

@@ -73,3 +73,21 @@ test("seeds and issues certificates only within the owning user's zone", () => {
     store.close();
   }
 });
+
+test("manages members and tokens without crossing account boundaries", () => {
+  const store = createControlPlaneStore(":memory:");
+  try {
+    assert.equal(store.listMembers("owner").length, 4);
+    assert.equal(store.listTokens("owner").length, 3);
+    const member = store.createMember("owner", "new@example.com", "DNS Editor", "astrolabe.io");
+    const token = store.createToken("owner");
+    assert.equal(store.deleteMember("other", member.id), false);
+    assert.equal(store.deleteToken("other", token.id), false);
+    assert.equal(store.deleteMember("owner", member.id), true);
+    assert.equal(store.deleteToken("owner", token.id), true);
+    assert.equal(store.listMembers("owner").length, 4);
+    assert.equal(store.listTokens("owner").length, 3);
+  } finally {
+    store.close();
+  }
+});

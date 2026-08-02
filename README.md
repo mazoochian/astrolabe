@@ -2,7 +2,7 @@
 
 A DNS & edge control-plane dashboard — zones, DNS records, TLS certificates, team access, and settings. Built with [SolidStart](https://start.solidjs.com/) (SolidJS SSR) and Tailwind CSS v4, using a neomorphic design system.
 
-This is a from-scratch SolidJS remake of a React/Loveable prototype ([nebula-domain-guard](https://github.com/mazoochian/nebula-domain-guard)) — same product concept, idiomatic Solid architecture underneath. Authentication, zones, DNS records, and TLS certificates are persisted in SQLite behind SolidStart server API routes; the remaining dashboard data is mocked client-side.
+This is a from-scratch SolidJS remake of a React/Loveable prototype ([nebula-domain-guard](https://github.com/mazoochian/nebula-domain-guard)) — same product concept, idiomatic Solid architecture underneath. Authentication, zones, DNS records, TLS certificates, members, and API-token metadata are persisted in SQLite behind SolidStart server API routes; traffic analytics remain mocked client-side.
 
 ## Prerequisites
 
@@ -72,6 +72,7 @@ src/
       zones.ts               Authenticated zone listing
       dns.ts                 Authenticated DNS record CRUD
       tls.ts                 Authenticated certificate listing and issuance
+      access.ts              Authenticated member and API-token management
     (app).tsx               Shared shell layout (sidebar + content) for the routes below
     (app)/
       dashboard.tsx          Zone overview (/dashboard)

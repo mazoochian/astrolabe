@@ -1,79 +1,139 @@
+export type TrafficPoint = { t: string; requests: number; cached: number };
+
 export type CoreDnsMetrics = {
   requests: number;
   cacheHits: number;
   meanLatencyMs: number;
   responses: Record<string, number>;
   queryTypes: Record<string, number>;
+  traffic: TrafficPoint[];
 };
 
-type Sample = { name: string; labels: Record<string, string>; value: number };
+type PrometheusSample = { metric: Record<string, string>; value: [number, string] };
+type PrometheusSeries = { metric: Record<string, string>; values: [number, string][] };
+type PrometheusResult = {
+  status: string;
+  error?: string;
+  data?: { resultType: string; result: PrometheusSample[] | PrometheusSeries[] };
+};
 
-export function parseCoreDnsMetrics(text: string, zone: string): CoreDnsMetrics {
-  const normalizedZone = zone.endsWith(".") ? zone : `${zone}.`;
-  const samples = text
-    .split(/\r?\n/)
-    .map(parseSample)
-    .filter((sample): sample is Sample => sample !== null)
-    .filter(
-      (sample) =>
-        !sample.labels.zone || sample.labels.zone === normalizedZone || sample.labels.zone === zone,
-    );
-
-  const sum = (name: string) =>
-    samples
-      .filter((sample) => sample.name === name)
-      .reduce((total, sample) => total + sample.value, 0);
-  const requests = sum("coredns_dns_requests_total");
-  const cacheHits = samples
-    .filter((sample) => sample.name === "coredns_cache_hits_total")
-    .filter(
-      (sample) =>
-        !sample.labels.zones ||
-        sample.labels.zones === normalizedZone ||
-        sample.labels.zones === zone,
-    )
-    .reduce((total, sample) => total + sample.value, 0);
-  const durationSum = sum("coredns_dns_request_duration_seconds_sum");
-  const durationCount = sum("coredns_dns_request_duration_seconds_count");
+export function buildCoreDnsQueries(zone: string) {
+  const label = escapePrometheusLabel(zone.endsWith(".") ? zone : `${zone}.`);
+  const requests = `coredns_dns_requests_total{zone="${label}"}`;
+  const cacheHits = `coredns_cache_hits_total{zones="${label}"}`;
+  const duration = `coredns_dns_request_duration_seconds`;
 
   return {
-    requests,
-    cacheHits,
-    meanLatencyMs: durationCount ? (durationSum / durationCount) * 1000 : 0,
-    responses: group(samples, "coredns_dns_responses_total", "rcode"),
-    queryTypes: group(samples, "coredns_dns_requests_total", "type"),
+    requests: `sum(increase(${requests}[24h]))`,
+    cacheHits: `sum(increase(${cacheHits}[24h]))`,
+    latency: `1000 * sum(rate(${duration}_sum{zone="${label}"}[5m])) / clamp_min(sum(rate(${duration}_count{zone="${label}"}[5m])), 1)`,
+    responses: `sum by (rcode) (increase(coredns_dns_responses_total{zone="${label}"}[24h]))`,
+    queryTypes: `sum by (type) (increase(${requests}[24h]))`,
+    requestRate: `sum(rate(${requests}[5m]))`,
+    cacheRate: `sum(rate(${cacheHits}[5m]))`,
   };
 }
 
-export async function fetchCoreDnsMetrics(url: string, zone: string): Promise<CoreDnsMetrics> {
-  const endpoint = new URL(url);
-  if (!["http:", "https:"].includes(endpoint.protocol))
-    throw new Error("CoreDNS metrics URL must use HTTP or HTTPS.");
-  const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
-  if (!response.ok) throw new Error(`CoreDNS metrics request failed with ${response.status}.`);
-  return parseCoreDnsMetrics(await response.text(), zone);
+export async function fetchCoreDnsMetrics(
+  prometheusUrl: string,
+  zone: string,
+  now = Date.now(),
+): Promise<CoreDnsMetrics> {
+  const queries = buildCoreDnsQueries(zone);
+  const end = Math.floor(now / 1000);
+  const start = end - 24 * 60 * 60;
+  const [requests, cacheHits, latency, responses, queryTypes, requestRate, cacheRate] =
+    await Promise.all([
+      instantQuery(prometheusUrl, queries.requests, end),
+      instantQuery(prometheusUrl, queries.cacheHits, end),
+      instantQuery(prometheusUrl, queries.latency, end),
+      instantQuery(prometheusUrl, queries.responses, end),
+      instantQuery(prometheusUrl, queries.queryTypes, end),
+      rangeQuery(prometheusUrl, queries.requestRate, start, end),
+      rangeQuery(prometheusUrl, queries.cacheRate, start, end),
+    ]);
+
+  return {
+    requests: scalar(requests),
+    cacheHits: scalar(cacheHits),
+    meanLatencyMs: scalar(latency),
+    responses: grouped(responses, "rcode"),
+    queryTypes: grouped(queryTypes, "type"),
+    traffic: mergeTraffic(requestRate, cacheRate),
+  };
 }
 
-function group(samples: Sample[], metric: string, label: string): Record<string, number> {
-  const result: Record<string, number> = {};
-  for (const sample of samples) {
-    if (sample.name !== metric || !sample.labels[label]) continue;
-    result[sample.labels[label]] = (result[sample.labels[label]] ?? 0) + sample.value;
+export function parsePrometheusResponse(payload: unknown, expectedType: "vector" | "matrix") {
+  const response = payload as PrometheusResult;
+  if (response?.status !== "success" || response.data?.resultType !== expectedType) {
+    throw new Error(response?.error || `Prometheus returned an invalid ${expectedType} response.`);
   }
-  return result;
+  return response.data.result;
 }
 
-function parseSample(line: string): Sample | null {
-  if (!line || line.startsWith("#")) return null;
-  const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+\d+)?$/);
-  if (!match) return null;
-  const value = Number(match[3]);
-  if (!Number.isFinite(value)) return null;
-  const labels: Record<string, string> = {};
-  for (const label of match[2]?.matchAll(/([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"])*)"/g) ?? []) {
-    labels[label[1]] = label[2].replace(/\\([\\"n])/g, (_, escaped: string) =>
-      escaped === "n" ? "\n" : escaped,
-    );
-  }
-  return { name: match[1], labels, value };
+function escapePrometheusLabel(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+}
+
+async function instantQuery(baseUrl: string, query: string, time: number) {
+  const payload = await prometheusRequest(baseUrl, "query", { query, time: String(time) });
+  return parsePrometheusResponse(payload, "vector") as PrometheusSample[];
+}
+
+async function rangeQuery(baseUrl: string, query: string, start: number, end: number) {
+  const payload = await prometheusRequest(baseUrl, "query_range", {
+    query,
+    start: String(start),
+    end: String(end),
+    step: "3h",
+  });
+  return parsePrometheusResponse(payload, "matrix") as PrometheusSeries[];
+}
+
+async function prometheusRequest(
+  baseUrl: string,
+  endpoint: string,
+  parameters: Record<string, string>,
+) {
+  const url = new URL(baseUrl);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("Prometheus URL must use HTTP or HTTPS.");
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/api/v1/${endpoint}`;
+  url.search = new URLSearchParams(parameters).toString();
+  const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+  if (!response.ok) throw new Error(`Prometheus request failed with ${response.status}.`);
+  return response.json();
+}
+
+function scalar(samples: PrometheusSample[]): number {
+  return finiteNumber(samples[0]?.value[1]);
+}
+
+function grouped(samples: PrometheusSample[], label: string): Record<string, number> {
+  return Object.fromEntries(
+    samples
+      .filter((sample) => sample.metric[label])
+      .map((sample) => [sample.metric[label], finiteNumber(sample.value[1])]),
+  );
+}
+
+function mergeTraffic(requestSeries: PrometheusSeries[], cacheSeries: PrometheusSeries[]) {
+  const cached = new Map(
+    (cacheSeries[0]?.values ?? []).map(([timestamp, value]) => [timestamp, finiteNumber(value)]),
+  );
+  return (requestSeries[0]?.values ?? []).map(([timestamp, value]) => ({
+    t: new Date(timestamp * 1000).toLocaleTimeString("en", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "UTC",
+    }),
+    requests: finiteNumber(value),
+    cached: cached.get(timestamp) ?? 0,
+  }));
+}
+
+function finiteNumber(value: string | undefined): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }

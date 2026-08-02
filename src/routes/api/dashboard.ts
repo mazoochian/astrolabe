@@ -12,14 +12,14 @@ export async function GET() {
     .find((item) => item.id === zoneId);
   if (!zone) return json({ error: "Zone not found." }, 404);
 
-  const metricsUrl = process.env.COREDNS_METRICS_URL;
-  if (!metricsUrl) return json({ source: "unconfigured", zone, metrics: null });
+  const prometheusUrl = process.env.PROMETHEUS_URL;
+  if (!prometheusUrl) return json({ source: "unconfigured", zone, metrics: null });
 
   try {
     return json({
-      source: "coredns",
+      source: "prometheus",
       zone,
-      metrics: await fetchCoreDnsMetrics(metricsUrl, zone.name),
+      metrics: await fetchCoreDnsMetrics(prometheusUrl, zone.name),
     });
   } catch (error) {
     return json(
@@ -27,7 +27,7 @@ export async function GET() {
         source: "unavailable",
         zone,
         metrics: null,
-        error: error instanceof Error ? error.message : "CoreDNS metrics are unavailable.",
+        error: error instanceof Error ? error.message : "Prometheus metrics are unavailable.",
       },
       502,
     );

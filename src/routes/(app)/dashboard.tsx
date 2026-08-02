@@ -10,7 +10,7 @@ import { latencySeries, responseMix, trafficSeries } from "~/lib/mock-data";
 import { cn } from "~/lib/utils";
 
 const chartTone = ["var(--chart-2)", "var(--chart-1)", "var(--chart-4)", "var(--chart-5)"];
-type DashboardSource = "unconfigured" | "coredns" | "unavailable";
+type DashboardSource = "unconfigured" | "prometheus" | "unavailable";
 
 const recentActivity = [
   { who: "Ito Mbeki", what: "Updated A record for www", when: "6 min ago" },
@@ -45,7 +45,7 @@ export default function DashboardPage() {
     const current = metrics();
     return [
       {
-        label: "Requests · cumulative",
+        label: "Requests · last 24 hours",
         value: current ? formatCount(current.requests) : "1.42 M",
         delta: current ? "Live" : "+8.4%",
         icon: Activity,
@@ -96,11 +96,11 @@ export default function DashboardPage() {
       <PageHeader
         title="astrolabe.io"
         subtitle={
-          source() === "coredns"
-            ? "Live counters from CoreDNS Prometheus metrics."
+          source() === "prometheus"
+            ? "CoreDNS analytics retained and queried through Prometheus."
             : source() === "unavailable"
-              ? "CoreDNS metrics are currently unavailable; showing demo analytics."
-              : "Configure COREDNS_METRICS_URL to replace demo analytics."
+              ? "Prometheus metrics are currently unavailable; showing demo analytics."
+              : "Configure PROMETHEUS_URL to replace demo analytics."
         }
         action={
           <div class="neo-sm flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
@@ -147,7 +147,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <div class="mt-6 h-64">
-            <TrafficChart data={trafficSeries} />
+            <TrafficChart data={metrics()?.traffic.length ? metrics()!.traffic : trafficSeries} />
           </div>
         </Card>
 

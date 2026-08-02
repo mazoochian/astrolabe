@@ -1,35 +1,83 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCoreDnsMetrics } from "./coredns-metrics.ts";
+import { URL } from "node:url";
+import {
+  buildCoreDnsQueries,
+  fetchCoreDnsMetrics,
+  parsePrometheusResponse,
+} from "./coredns-metrics.ts";
 
-const fixture = `
-# HELP coredns_dns_requests_total Counter of DNS requests made per zone.
-coredns_dns_requests_total{server="dns://:53",zone="astrolabe.io.",type="A"} 120
-coredns_dns_requests_total{server="dns://:53",zone="astrolabe.io.",type="AAAA"} 30
-coredns_dns_requests_total{server="dns://:53",zone="other.io.",type="A"} 999
-coredns_dns_responses_total{server="dns://:53",zone="astrolabe.io.",rcode="NOERROR",plugin="file"} 140
-coredns_dns_responses_total{server="dns://:53",zone="astrolabe.io.",rcode="NXDOMAIN",plugin="file"} 10
-coredns_dns_request_duration_seconds_sum{server="dns://:53",zone="astrolabe.io.",type="A"} 3
-coredns_dns_request_duration_seconds_count{server="dns://:53",zone="astrolabe.io.",type="A"} 150
-coredns_cache_hits_total{server="dns://:53",zones="astrolabe.io.",type="success"} 90
-`;
-
-test("aggregates CoreDNS Prometheus metrics for one zone", () => {
-  assert.deepEqual(parseCoreDnsMetrics(fixture, "astrolabe.io"), {
-    requests: 150,
-    cacheHits: 90,
-    meanLatencyMs: 20,
-    responses: { NOERROR: 140, NXDOMAIN: 10 },
-    queryTypes: { A: 120, AAAA: 30 },
-  });
+test("builds zone-scoped CoreDNS PromQL queries", () => {
+  const queries = buildCoreDnsQueries('example"zone');
+  assert.match(queries.requests, /zone="example\\"zone\."/);
+  assert.match(queries.cacheHits, /zones="example\\"zone\."/);
+  assert.match(queries.responses, /sum by \(rcode\)/);
+  assert.match(queries.requestRate, /rate\(.+\[5m\]\)/);
 });
 
-test("returns zeroed aggregates when a zone has no samples", () => {
-  assert.deepEqual(parseCoreDnsMetrics(fixture, "missing.io"), {
-    requests: 0,
-    cacheHits: 0,
-    meanLatencyMs: 0,
-    responses: {},
-    queryTypes: {},
-  });
+test("accepts a successful Prometheus vector response", () => {
+  const result = [{ metric: { rcode: "NOERROR" }, value: [1, "42"] }];
+  assert.deepEqual(
+    parsePrometheusResponse(
+      { status: "success", data: { resultType: "vector", result } },
+      "vector",
+    ),
+    result,
+  );
+});
+
+test("rejects errors and unexpected Prometheus result types", () => {
+  assert.throws(
+    () => parsePrometheusResponse({ status: "error", error: "bad query" }, "vector"),
+    /bad query/,
+  );
+  assert.throws(
+    () =>
+      parsePrometheusResponse(
+        { status: "success", data: { resultType: "matrix", result: [] } },
+        "vector",
+      ),
+    /invalid vector response/,
+  );
+});
+
+test("assembles instant and historical Prometheus results for the dashboard", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => (globalThis.fetch = originalFetch));
+  globalThis.fetch = async (url) => {
+    const endpoint = new URL(url);
+    const query = endpoint.searchParams.get("query");
+    const isRange = endpoint.pathname.endsWith("query_range");
+    let result;
+    if (isRange) {
+      const values = query.includes("cache_hits") ? [[1_700_000_000, "3"]] : [[1_700_000_000, "5"]];
+      result = [{ metric: {}, values }];
+    } else if (query.includes("by (rcode)")) {
+      result = [{ metric: { rcode: "NOERROR" }, value: [1_700_000_000, "90"] }];
+    } else if (query.includes("by (type)")) {
+      result = [{ metric: { type: "A" }, value: [1_700_000_000, "75"] }];
+    } else {
+      const value = query.includes("cache_hits") ? "60" : query.startsWith("1000") ? "12.5" : "100";
+      result = [{ metric: {}, value: [1_700_000_000, value] }];
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        status: "success",
+        data: { resultType: isRange ? "matrix" : "vector", result },
+      }),
+    };
+  };
+
+  assert.deepEqual(
+    await fetchCoreDnsMetrics("http://prometheus:9090", "example.com", 1_700_000_000_000),
+    {
+      requests: 100,
+      cacheHits: 60,
+      meanLatencyMs: 12.5,
+      responses: { NOERROR: 90 },
+      queryTypes: { A: 75 },
+      traffic: [{ t: "22:13", requests: 5, cached: 3 }],
+    },
+  );
 });

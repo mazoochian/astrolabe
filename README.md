@@ -2,7 +2,7 @@
 
 A DNS & edge control-plane dashboard — zones, DNS records, TLS certificates, team access, and settings. Built with [SolidStart](https://start.solidjs.com/) (SolidJS SSR) and Tailwind CSS v4, using a neomorphic design system.
 
-This is a from-scratch SolidJS remake of a React/Loveable prototype ([nebula-domain-guard](https://github.com/mazoochian/nebula-domain-guard)) — same product concept, idiomatic Solid architecture underneath. Authentication, account settings, zones, DNS records, TLS certificates, members, and API-token metadata are persisted in SQLite behind SolidStart server API routes; traffic analytics remain mocked client-side.
+This is a from-scratch SolidJS remake of a React/Loveable prototype ([nebula-domain-guard](https://github.com/mazoochian/nebula-domain-guard)) — same product concept, idiomatic Solid architecture underneath. Authentication, account settings, zones, DNS records, TLS certificates, members, and API-token metadata are persisted in SQLite behind SolidStart server API routes. Traffic analytics use Prometheus when configured and retain the existing demo data as an unconfigured fallback.
 
 ## Prerequisites
 
@@ -42,6 +42,11 @@ scrape the CoreDNS endpoint (normally `127.0.0.1:9153`). Then set
 `PROMETHEUS_URL` to the Prometheus server, for example
 `http://127.0.0.1:9090`. Prometheus owns metrics retention; Astrolabe only sends
 authenticated, server-generated, zone-scoped PromQL queries to its HTTP API.
+
+> Architecture note: connecting Astrolabe to Prometheus is preferred over
+> scraping CoreDNS directly. Prometheus provides the historical retention and
+> range queries required by dashboard charts without introducing a second
+> database inside the frontend application.
 
 ## Production build
 

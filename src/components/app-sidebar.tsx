@@ -13,6 +13,7 @@ import {
 import { createSignal, For, onMount, Show } from "solid-js";
 import { useTheme } from "~/components/theme-provider";
 import type { Zone } from "~/lib/domain";
+import type { User as AccountUser } from "~/lib/user-store";
 import { cn } from "~/lib/utils";
 
 const items = [
@@ -26,15 +27,25 @@ const items = [
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggle } = useTheme();
+  const { theme, setTheme, toggle } = useTheme();
   const [activeZone, setActiveZone] = createSignal<Zone | null>(null);
+  const [user, setUser] = createSignal<AccountUser | null>(null);
 
   onMount(async () => {
     try {
-      const response = await fetch("/api/zones");
-      if (!response.ok) return;
-      const data = (await response.json()) as { zones: Zone[] };
-      setActiveZone(data.zones[0] ?? null);
+      const [zonesResponse, settingsResponse] = await Promise.all([
+        fetch("/api/zones"),
+        fetch("/api/settings"),
+      ]);
+      if (zonesResponse.ok) {
+        const data = (await zonesResponse.json()) as { zones: Zone[] };
+        setActiveZone(data.zones[0] ?? null);
+      }
+      if (settingsResponse.ok) {
+        const data = (await settingsResponse.json()) as { user: AccountUser };
+        setUser(data.user);
+        setTheme(data.user.theme);
+      }
     } catch {
       // The application shell remains usable while the zone request is retried on navigation.
     }
@@ -106,8 +117,8 @@ export function AppSidebar() {
         <div class="flex items-center gap-3">
           <div class="size-10 rounded-full bg-accent" />
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">Nadia Farrell</p>
-            <p class="truncate text-xs text-muted-foreground">Super Admin</p>
+            <p class="truncate text-sm font-medium">{user()?.displayName ?? "Loading…"}</p>
+            <p class="truncate text-xs text-muted-foreground">{user()?.role ?? ""}</p>
           </div>
           <button
             onClick={signOut}

@@ -13,6 +13,9 @@ export type User = {
   email: string;
   displayName: string;
   role: string;
+  theme: "light" | "dark";
+  defaultTtl: string;
+  proxyByDefault: boolean;
 };
 
 type UserRow = {
@@ -21,6 +24,9 @@ type UserRow = {
   password_hash: string;
   display_name: string;
   role: string;
+  theme: "light" | "dark";
+  default_ttl: string;
+  proxy_by_default: number;
 };
 
 const SCRYPT_KEY_LENGTH = 64;
@@ -58,15 +64,33 @@ export function createUserStore(databasePath: string = defaultDatabasePath()) {
       password_hash TEXT NOT NULL,
       display_name TEXT NOT NULL,
       role TEXT NOT NULL,
+      theme TEXT NOT NULL DEFAULT 'dark',
+      default_ttl TEXT NOT NULL DEFAULT 'Auto',
+      proxy_by_default INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  const columns = new Set(
+    (database.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  if (!columns.has("theme"))
+    database.exec("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'");
+  if (!columns.has("default_ttl"))
+    database.exec("ALTER TABLE users ADD COLUMN default_ttl TEXT NOT NULL DEFAULT 'Auto'");
+  if (!columns.has("proxy_by_default"))
+    database.exec("ALTER TABLE users ADD COLUMN proxy_by_default INTEGER NOT NULL DEFAULT 1");
 
   const toUser = (row: UserRow): User => ({
     id: row.id,
     email: row.email,
     displayName: row.display_name,
     role: row.role,
+    theme: row.theme,
+    defaultTtl: row.default_ttl,
+    proxyByDefault: row.proxy_by_default === 1,
   });
 
   return {
@@ -81,6 +105,9 @@ export function createUserStore(databasePath: string = defaultDatabasePath()) {
         email: input.email.trim().toLowerCase(),
         displayName: input.displayName.trim(),
         role: input.role,
+        theme: "dark" as const,
+        defaultTtl: "Auto",
+        proxyByDefault: true,
       };
       database
         .prepare(
@@ -102,6 +129,32 @@ export function createUserStore(databasePath: string = defaultDatabasePath()) {
         UserRow | undefined;
       if (!row || !verifyPassword(password, row.password_hash)) return null;
       return toUser(row);
+    },
+
+    updateUser(
+      id: string,
+      input: {
+        email: string;
+        displayName: string;
+        theme: "light" | "dark";
+        defaultTtl: string;
+        proxyByDefault: boolean;
+      },
+    ): User | null {
+      const result = database
+        .prepare(
+          `UPDATE users SET email = ?, display_name = ?, theme = ?, default_ttl = ?, proxy_by_default = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.email.trim().toLowerCase(),
+          input.displayName.trim(),
+          input.theme,
+          input.defaultTtl,
+          Number(input.proxyByDefault),
+          id,
+        );
+      return result.changes ? this.findById(id) : null;
     },
 
     count(): number {

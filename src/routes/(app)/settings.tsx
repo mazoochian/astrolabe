@@ -1,21 +1,70 @@
-import { KeyRound, Mail, Moon, Sun, User } from "lucide-solid";
-import { createSignal, For } from "solid-js";
+import { Mail, Moon, Save, Sun, User } from "lucide-solid";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { PageHeader } from "~/components/page-header";
 import { useTheme } from "~/components/theme-provider";
 import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
+import type { User as AccountUser } from "~/lib/user-store";
 import { cn } from "~/lib/utils";
 
 const themes = ["light", "dark"] as const;
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const [apiKey, setApiKey] = createSignal("");
+  const [user, setUser] = createSignal<AccountUser | null>(null);
+  const [displayName, setDisplayName] = createSignal("");
+  const [email, setEmail] = createSignal("");
+  const [defaultTtl, setDefaultTtl] = createSignal("Auto");
+  const [proxyByDefault, setProxyByDefault] = createSignal(true);
+  const [saving, setSaving] = createSignal(false);
+  const [message, setMessage] = createSignal("");
+
+  onMount(async () => {
+    try {
+      const data = await request<{ user: AccountUser }>("/api/settings");
+      setUser(data.user);
+      setDisplayName(data.user.displayName);
+      setEmail(data.user.email);
+      setDefaultTtl(data.user.defaultTtl);
+      setProxyByDefault(data.user.proxyByDefault);
+      setTheme(data.user.theme);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Unable to load account settings.");
+    }
+  });
+
+  const save = async () => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const data = await request<{ user: AccountUser }>("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: displayName(),
+          email: email(),
+          theme: theme(),
+          defaultTtl: defaultTtl(),
+          proxyByDefault: proxyByDefault(),
+        }),
+      });
+      setUser(data.user);
+      setMessage("Settings saved.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Unable to save account settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div class="space-y-6">
       <PageHeader title="Settings" subtitle="Manage your account, appearance, and API access." />
+
+      <Show when={message()}>
+        <div class="neo-inset rounded-xl px-4 py-3 text-sm text-muted-foreground">{message()}</div>
+      </Show>
 
       <Card class="space-y-6 p-6">
         <div>
@@ -40,43 +89,28 @@ export default function SettingsPage() {
         </div>
 
         <div class="border-t border-border/70 pt-6">
-          <h2 class="text-base font-semibold">API Keys</h2>
-          <p class="mt-1 text-xs text-muted-foreground">
-            Manage programmatic access to your account.
-          </p>
-          <div class="mt-4 flex flex-wrap gap-3">
-            <div class="neo-inset flex min-w-64 flex-1 items-center gap-2 px-4 py-2.5">
-              <KeyRound class="size-4 text-muted-foreground" />
-              <Input
-                value={apiKey()}
-                onInput={(e) => setApiKey(e.currentTarget.value)}
-                placeholder="sk_live_••••••••••••••••"
-                class="font-mono"
-                readOnly
-              />
-            </div>
-            <Button>Generate new key</Button>
-          </div>
-        </div>
-
-        <div class="border-t border-border/70 pt-6">
           <h2 class="text-base font-semibold">Account</h2>
           <p class="mt-1 text-xs text-muted-foreground">Update your profile information.</p>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
-            <div class="neo-inset flex items-center gap-3 px-4 py-3">
+            <label class="neo-inset flex items-center gap-3 px-4 py-3">
               <User class="size-4 text-muted-foreground" />
-              <div>
-                <p class="text-xs text-muted-foreground">Display name</p>
-                <p class="font-medium">Nadia Farrell</p>
-              </div>
-            </div>
-            <div class="neo-inset flex items-center gap-3 px-4 py-3">
+              <Input
+                value={displayName()}
+                onInput={(event) => setDisplayName(event.currentTarget.value)}
+                placeholder="Display name"
+                disabled={!user()}
+              />
+            </label>
+            <label class="neo-inset flex items-center gap-3 px-4 py-3">
               <Mail class="size-4 text-muted-foreground" />
-              <div>
-                <p class="text-xs text-muted-foreground">Email</p>
-                <p class="font-medium">nadia@astrolabe.io</p>
-              </div>
-            </div>
+              <Input
+                type="email"
+                value={email()}
+                onInput={(event) => setEmail(event.currentTarget.value)}
+                placeholder="Email address"
+                disabled={!user()}
+              />
+            </label>
           </div>
         </div>
 
@@ -86,20 +120,42 @@ export default function SettingsPage() {
           <div class="mt-4 space-y-3">
             <label class="neo-inset flex items-center justify-between px-4 py-3">
               <span class="text-sm">Default TTL: Auto</span>
-              <select class="neo-pressable bg-transparent px-3 py-1.5 text-sm outline-none">
-                <option>Auto</option>
-                <option>5 min</option>
-                <option>1 hour</option>
-                <option>4 hours</option>
+              <select
+                value={defaultTtl()}
+                onChange={(event) => setDefaultTtl(event.currentTarget.value)}
+                class="neo-pressable bg-transparent px-3 py-1.5 text-sm outline-none"
+              >
+                <For each={["Auto", "5 min", "1 hour", "4 hours"]}>
+                  {(ttl) => <option>{ttl}</option>}
+                </For>
               </select>
             </label>
             <label class="neo-inset flex items-center justify-between px-4 py-3">
               <span class="text-sm">Proxy new records by default</span>
-              <input type="checkbox" checked class="accent-primary" />
+              <input
+                type="checkbox"
+                checked={proxyByDefault()}
+                onChange={(event) => setProxyByDefault(event.currentTarget.checked)}
+                class="accent-primary"
+              />
             </label>
           </div>
+        </div>
+
+        <div class="flex justify-end border-t border-border/70 pt-6">
+          <Button onClick={save} disabled={!user() || saving()}>
+            <Save class="size-4" />
+            {saving() ? "Saving…" : "Save settings"}
+          </Button>
         </div>
       </Card>
     </div>
   );
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(data.error ?? "The request failed.");
+  return data;
 }

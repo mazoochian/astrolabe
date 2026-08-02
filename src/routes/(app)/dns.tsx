@@ -5,6 +5,7 @@ import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { dnsRecordTypes, type DnsRecord, type DnsRecordInput, type Zone } from "~/lib/domain";
+import type { User as AccountUser } from "~/lib/user-store";
 import { cn } from "~/lib/utils";
 
 export default function DnsPage() {
@@ -15,10 +16,17 @@ export default function DnsPage() {
   const [query, setQuery] = createSignal("");
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal("");
+  const [defaultTtl, setDefaultTtl] = createSignal("Auto");
+  const [proxyByDefault, setProxyByDefault] = createSignal(true);
 
   onMount(async () => {
     try {
-      const zoneData = await request<{ zones: Zone[] }>("/api/zones");
+      const [zoneData, settingsData] = await Promise.all([
+        request<{ zones: Zone[] }>("/api/zones"),
+        request<{ user: AccountUser }>("/api/settings"),
+      ]);
+      setDefaultTtl(settingsData.user.defaultTtl);
+      setProxyByDefault(settingsData.user.proxyByDefault);
       const activeZone = zoneData.zones[0];
       if (!activeZone) throw new Error("No DNS zone is available.");
       setZone(activeZone);
@@ -71,8 +79,8 @@ export default function DnsPage() {
       type: "A",
       name: "new",
       content: "203.0.113.10",
-      ttl: "Auto",
-      proxied: true,
+      ttl: defaultTtl(),
+      proxied: proxyByDefault(),
     };
     setError("");
     try {

@@ -28,6 +28,17 @@ test("persists and authenticates users in SQLite", () => {
     assert.deepEqual(store.authenticate("NADIA@ASTROLABE.IO", "secret-password"), created);
     assert.equal(store.authenticate(created.email, "wrong"), null);
     assert.deepEqual(store.findById(created.id), created);
+    const updated = store.updateUser(created.id, {
+      email: "nadia@example.com",
+      displayName: "Nadia Updated",
+      theme: "light",
+      defaultTtl: "5 min",
+      proxyByDefault: false,
+    });
+    assert.equal(updated?.email, "nadia@example.com");
+    assert.equal(updated?.theme, "light");
+    assert.equal(updated?.defaultTtl, "5 min");
+    assert.equal(updated?.proxyByDefault, false);
   } finally {
     store.close();
   }

@@ -1,4 +1,4 @@
-import { A, useLocation } from "@solidjs/router";
+import { A, useLocation, useNavigate } from "@solidjs/router";
 import {
   Compass,
   LayoutDashboard,
@@ -25,8 +25,17 @@ const items = [
 
 export function AppSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const activeZone = zones[0];
+
+  const signOut = async () => {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } finally {
+      navigate("/", { replace: true });
+    }
+  };
 
   return (
     <aside class="sticky top-0 flex h-screen w-[16.5rem] shrink-0 flex-col gap-6 bg-sidebar p-5">
@@ -82,13 +91,13 @@ export function AppSidebar() {
             <p class="truncate text-sm font-medium">Nadia Farrell</p>
             <p class="truncate text-xs text-muted-foreground">Super Admin</p>
           </div>
-          <A
-            href="/"
+          <button
+            onClick={signOut}
             aria-label="Sign out"
             class="neo-pressable grid size-8 place-items-center rounded-lg text-muted-foreground"
           >
             <LogOut class="size-4" />
-          </A>
+          </button>
         </div>
         <button
           onClick={toggle}

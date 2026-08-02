@@ -1,5 +1,5 @@
 import { For } from "solid-js";
-import type { latencySeries, responseMix, trafficSeries } from "~/lib/mock-data";
+import type { latencySeries, trafficSeries } from "~/lib/mock-data";
 
 const chartTone = ["var(--chart-2)", "var(--chart-1)", "var(--chart-4)", "var(--chart-5)"];
 
@@ -75,7 +75,9 @@ export function TrafficChart(props: { data: typeof trafficSeries }) {
   );
 }
 
-export function ResponseMixChart(props: { data: typeof responseMix }) {
+export function ResponseMixChart(props: {
+  data: readonly { name: string; value: number; key: string }[];
+}) {
   const radius = 60;
   const centerX = 150;
   const centerY = 120;
@@ -96,7 +98,13 @@ export function ResponseMixChart(props: { data: typeof responseMix }) {
       const path = `M${centerX},${centerY} L${x1},${y1} A${radius},${radius} 0 ${largeArc},1 ${x2},${y2} Z`;
       startAngle = endAngle;
 
-      return { path, color: chartTone[i], name: r.name, value: r.value, key: r.key };
+      return {
+        path,
+        color: chartTone[i % chartTone.length],
+        name: r.name,
+        value: r.value,
+        key: r.key,
+      };
     });
   };
 
@@ -108,7 +116,7 @@ export function ResponseMixChart(props: { data: typeof responseMix }) {
         <For each={props.data}>
           {(r, i) => (
             <text x={centerX + 80} y={centerY - 30 + i() * 20}>
-              <tspan style={{ fill: chartTone[i()] }}>■ </tspan>
+              <tspan style={{ fill: chartTone[i() % chartTone.length] }}>■ </tspan>
               {r.name} {r.value}%
             </text>
           )}

@@ -36,6 +36,11 @@ password. Override them with `ASTROLABE_DEMO_EMAIL` and
 `ASTROLABE_DATABASE_PATH` (defaults to `data/astrolabe.db`) and always set a
 strong, private `ASTROLABE_SESSION_SECRET` in production.
 
+To connect dashboard statistics, enable CoreDNS's `prometheus` plugin and set
+`COREDNS_METRICS_URL` to its metrics endpoint (normally
+`http://127.0.0.1:9153/metrics`). Astrolabe filters CoreDNS counters by the
+selected zone and never exposes the metrics endpoint directly to browsers.
+
 ## Production build
 
 ```bash
@@ -74,6 +79,7 @@ src/
       tls.ts                 Authenticated certificate listing and issuance
       access.ts              Authenticated member and API-token management
       settings.ts            Authenticated profile and preference management
+      dashboard.ts           Authenticated CoreDNS metrics adapter
     (app).tsx               Shared shell layout (sidebar + content) for the routes below
     (app)/
       dashboard.tsx          Zone overview (/dashboard)

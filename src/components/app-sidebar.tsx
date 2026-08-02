@@ -10,9 +10,9 @@ import {
   Sun,
   Users,
 } from "lucide-solid";
-import { For } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { useTheme } from "~/components/theme-provider";
-import { zones } from "~/lib/mock-data";
+import type { Zone } from "~/lib/domain";
 import { cn } from "~/lib/utils";
 
 const items = [
@@ -27,7 +27,18 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  const activeZone = zones[0];
+  const [activeZone, setActiveZone] = createSignal<Zone | null>(null);
+
+  onMount(async () => {
+    try {
+      const response = await fetch("/api/zones");
+      if (!response.ok) return;
+      const data = (await response.json()) as { zones: Zone[] };
+      setActiveZone(data.zones[0] ?? null);
+    } catch {
+      // The application shell remains usable while the zone request is retried on navigation.
+    }
+  });
 
   const signOut = async () => {
     try {
@@ -51,15 +62,22 @@ export function AppSidebar() {
 
       <div class="neo-inset px-4 py-3">
         <p class="text-[0.65rem] uppercase tracking-widest text-muted-foreground">Active zone</p>
-        <p class="mt-1 flex items-center gap-2 text-sm font-medium">
-          <span
-            class={cn(
-              "size-1.5 rounded-full",
-              activeZone.status === "Active" ? "bg-success" : "bg-warning",
-            )}
-          />
-          {activeZone.name}
-        </p>
+        <Show
+          when={activeZone()}
+          fallback={<p class="mt-1 text-sm text-muted-foreground">Loading…</p>}
+        >
+          {(zone) => (
+            <p class="mt-1 flex items-center gap-2 text-sm font-medium">
+              <span
+                class={cn(
+                  "size-1.5 rounded-full",
+                  zone().status === "Active" ? "bg-success" : "bg-warning",
+                )}
+              />
+              {zone().name}
+            </p>
+          )}
+        </Show>
       </div>
 
       <nav class="flex flex-1 flex-col gap-2">

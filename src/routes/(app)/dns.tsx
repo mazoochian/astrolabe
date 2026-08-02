@@ -1,17 +1,37 @@
 import { Check, Cloud, CloudOff, Pencil, Plus, Search, Trash2, X } from "lucide-solid";
-import { createMemo, createSignal, For } from "solid-js";
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { PageHeader } from "~/components/page-header";
 import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { dnsRecordTypes, initialRecords, type DnsRecord } from "~/lib/mock-data";
+import { dnsRecordTypes, type DnsRecord, type DnsRecordInput, type Zone } from "~/lib/domain";
 import { cn } from "~/lib/utils";
 
 export default function DnsPage() {
-  const [records, setRecords] = createSignal<DnsRecord[]>(initialRecords);
+  const [records, setRecords] = createSignal<DnsRecord[]>([]);
+  const [zone, setZone] = createSignal<Zone | null>(null);
   const [editing, setEditing] = createSignal<string | null>(null);
   const [draft, setDraft] = createSignal<DnsRecord | null>(null);
   const [query, setQuery] = createSignal("");
+  const [loading, setLoading] = createSignal(true);
+  const [error, setError] = createSignal("");
+
+  onMount(async () => {
+    try {
+      const zoneData = await request<{ zones: Zone[] }>("/api/zones");
+      const activeZone = zoneData.zones[0];
+      if (!activeZone) throw new Error("No DNS zone is available.");
+      setZone(activeZone);
+      const recordData = await request<{ records: DnsRecord[] }>(
+        `/api/dns?zoneId=${encodeURIComponent(activeZone.id)}`,
+      );
+      setRecords(recordData.records);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load DNS records.");
+    } finally {
+      setLoading(false);
+    }
+  });
 
   const visible = createMemo(() =>
     records().filter(
@@ -26,24 +46,60 @@ export default function DnsPage() {
     setDraft({ ...r });
   };
 
-  const save = () => {
-    if (!draft()) return;
-    setRecords((rs) => rs.map((r) => (r.id === draft()!.id ? draft()! : r)));
-    setEditing(null);
-    setDraft(null);
+  const save = async () => {
+    const record = draft();
+    if (!record) return;
+    setError("");
+    try {
+      const data = await request<{ record: DnsRecord }>("/api/dns", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(record),
+      });
+      setRecords((items) => items.map((item) => (item.id === record.id ? data.record : item)));
+      setEditing(null);
+      setDraft(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save the DNS record.");
+    }
   };
 
-  const addRecord = () => {
-    const r: DnsRecord = {
-      id: crypto.randomUUID(),
+  const addRecord = async () => {
+    const activeZone = zone();
+    if (!activeZone) return;
+    const input: DnsRecordInput = {
       type: "A",
       name: "new",
       content: "203.0.113.10",
       ttl: "Auto",
       proxied: true,
     };
-    setRecords((rs) => [r, ...rs]);
-    startEdit(r);
+    setError("");
+    try {
+      const data = await request<{ record: DnsRecord }>("/api/dns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zoneId: activeZone.id, ...input }),
+      });
+      setRecords((items) => [data.record, ...items]);
+      startEdit(data.record);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create the DNS record.");
+    }
+  };
+
+  const deleteRecord = async (id: string) => {
+    setError("");
+    try {
+      await request("/api/dns", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setRecords((items) => items.filter((item) => item.id !== id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to delete the DNS record.");
+    }
   };
 
   const cell = "px-4 py-3 text-sm";
@@ -52,7 +108,7 @@ export default function DnsPage() {
     <>
       <PageHeader
         title="DNS records"
-        subtitle={`${records().length} records · propagation typically under 30 seconds`}
+        subtitle={`${records().length} records${zone() ? ` for ${zone()!.name}` : ""} · propagation typically under 30 seconds`}
         action={
           <Button onClick={addRecord}>
             <Plus class="size-4" />
@@ -60,6 +116,14 @@ export default function DnsPage() {
           </Button>
         }
       />
+
+      <Show when={error()}>
+        <div class="neo-inset rounded-xl px-4 py-3 text-sm text-destructive">{error()}</div>
+      </Show>
+
+      <Show when={loading()}>
+        <div class="py-8 text-center text-sm text-muted-foreground">Loading DNS records…</div>
+      </Show>
 
       <div class="neo-inset flex items-center gap-3 px-4 py-2.5">
         <Search class="size-4 text-muted-foreground" />
@@ -202,7 +266,7 @@ export default function DnsPage() {
                             <Button
                               variant="icon"
                               size="icon-sm"
-                              onClick={() => setRecords((rs) => rs.filter((x) => x.id !== r.id))}
+                              onClick={() => deleteRecord(r.id)}
                               class="text-destructive"
                               aria-label="Delete record"
                             >
@@ -234,4 +298,13 @@ export default function DnsPage() {
       </Card>
     </>
   );
+}
+
+async function request<T = unknown>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (response.status === 204) return undefined as T;
+
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(data.error ?? "The request failed.");
+  return data;
 }

@@ -28,42 +28,6 @@ export const latencySeries = [
   { t: "Sun", ms: 33 },
 ] as const;
 
-export type Certificate = {
-  id: string;
-  hosts: string;
-  authority: string;
-  type: string;
-  status: "Active" | "Issuing";
-  expires: string;
-};
-
-export const certificates: Certificate[] = [
-  {
-    id: "c1",
-    hosts: "astrolabe.io, *.astrolabe.io",
-    authority: "Let's Encrypt",
-    type: "Universal",
-    status: "Active",
-    expires: "12 Oct 2026",
-  },
-  {
-    id: "c2",
-    hosts: "api.astrolabe.io",
-    authority: "Google Trust",
-    type: "Advanced",
-    status: "Active",
-    expires: "03 Sep 2026",
-  },
-  {
-    id: "c3",
-    hosts: "beta.astrolabe.io",
-    authority: "Let's Encrypt",
-    type: "Universal",
-    status: "Issuing",
-    expires: "—",
-  },
-];
-
 export type Member = {
   id: string;
   name: string;

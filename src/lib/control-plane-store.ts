@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { DnsRecord, DnsRecordInput, Zone } from "~/lib/domain";
+import type { Certificate, DnsRecord, DnsRecordInput, Zone } from "~/lib/domain";
 
 type ZoneRow = { id: string; name: string; status: Zone["status"] };
 type DnsRecordRow = {
@@ -14,6 +14,39 @@ type DnsRecordRow = {
   ttl: string;
   proxied: number;
 };
+type CertificateRow = {
+  id: string;
+  zone_id: string;
+  hosts: string;
+  authority: string;
+  type: string;
+  status: Certificate["status"];
+  expires: string;
+};
+
+const seedCertificates = [
+  {
+    hosts: "astrolabe.io, *.astrolabe.io",
+    authority: "Let's Encrypt",
+    type: "Universal",
+    status: "Active",
+    expires: "12 Oct 2026",
+  },
+  {
+    hosts: "api.astrolabe.io",
+    authority: "Google Trust",
+    type: "Advanced",
+    status: "Active",
+    expires: "03 Sep 2026",
+  },
+  {
+    hosts: "beta.astrolabe.io",
+    authority: "Let's Encrypt",
+    type: "Universal",
+    status: "Issuing",
+    expires: "—",
+  },
+] satisfies Array<Omit<Certificate, "id" | "zoneId">>;
 
 const seedRecords: DnsRecordInput[] = [
   { type: "A", name: "@", content: "198.51.100.24", ttl: "Auto", proxied: true },
@@ -61,6 +94,16 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
       proxied INTEGER NOT NULL CHECK (proxied IN (0, 1)),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS certificates (
+      id TEXT PRIMARY KEY,
+      zone_id TEXT NOT NULL REFERENCES zones(id) ON DELETE CASCADE,
+      hosts TEXT NOT NULL,
+      authority TEXT NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('Active', 'Issuing')),
+      expires TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const toZone = (row: ZoneRow): Zone => ({ ...row });
@@ -73,11 +116,42 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
     ttl: row.ttl,
     proxied: row.proxied === 1,
   });
+  const toCertificate = (row: CertificateRow): Certificate => ({
+    id: row.id,
+    zoneId: row.zone_id,
+    hosts: row.hosts,
+    authority: row.authority,
+    type: row.type,
+    status: row.status,
+    expires: row.expires,
+  });
 
   const insertRecord = database.prepare(
     `INSERT INTO dns_records (id, zone_id, type, name, content, ttl, proxied)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
+  const insertCertificate = database.prepare(
+    `INSERT INTO certificates (id, zone_id, hosts, authority, type, status, expires)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  const seedCertificatesForZone = (zoneId: string) => {
+    const existing = database
+      .prepare("SELECT id FROM certificates WHERE zone_id = ? LIMIT 1")
+      .get(zoneId);
+    if (existing) return;
+    for (const certificate of seedCertificates) {
+      insertCertificate.run(
+        randomUUID(),
+        zoneId,
+        certificate.hosts,
+        certificate.authority,
+        certificate.type,
+        certificate.status,
+        certificate.expires,
+      );
+    }
+  };
 
   const seedForUser = (userId: string) => {
     const existing = database.prepare("SELECT id FROM zones WHERE user_id = ? LIMIT 1").get(userId);
@@ -169,6 +243,45 @@ export function createControlPlaneStore(databasePath: string = defaultDatabasePa
         )
         .run(id, userId);
       return result.changes > 0;
+    },
+
+    listCertificates(userId: string, zoneId: string): Certificate[] {
+      const zone = database
+        .prepare("SELECT id FROM zones WHERE id = ? AND user_id = ?")
+        .get(zoneId, userId);
+      if (!zone) return [];
+      seedCertificatesForZone(zoneId);
+      return (
+        database
+          .prepare("SELECT * FROM certificates WHERE zone_id = ? ORDER BY created_at")
+          .all(zoneId) as CertificateRow[]
+      ).map(toCertificate);
+    },
+
+    createCertificate(userId: string, zoneId: string, hosts: string): Certificate | null {
+      const zone = database
+        .prepare("SELECT id FROM zones WHERE id = ? AND user_id = ?")
+        .get(zoneId, userId);
+      if (!zone) return null;
+      const certificate: Certificate = {
+        id: randomUUID(),
+        zoneId,
+        hosts,
+        authority: "Let's Encrypt",
+        type: "Universal",
+        status: "Issuing",
+        expires: "—",
+      };
+      insertCertificate.run(
+        certificate.id,
+        zoneId,
+        certificate.hosts,
+        certificate.authority,
+        certificate.type,
+        certificate.status,
+        certificate.expires,
+      );
+      return certificate;
     },
 
     close(): void {

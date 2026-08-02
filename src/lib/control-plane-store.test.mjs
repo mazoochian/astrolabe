@@ -55,3 +55,21 @@ test("creates, updates, and deletes records within the owning user's zone", () =
     store.close();
   }
 });
+
+test("seeds and issues certificates only within the owning user's zone", () => {
+  const store = createControlPlaneStore(":memory:");
+
+  try {
+    const zone = store.listZones("owner")[0];
+    assert.equal(store.listCertificates("owner", zone.id).length, 3);
+    assert.equal(store.listCertificates("other-user", zone.id).length, 0);
+
+    const certificate = store.createCertificate("owner", zone.id, "shop.astrolabe.io");
+    assert.ok(certificate);
+    assert.equal(certificate.status, "Issuing");
+    assert.equal(store.createCertificate("other-user", zone.id, "forbidden.astrolabe.io"), null);
+    assert.equal(store.listCertificates("owner", zone.id).length, 4);
+  } finally {
+    store.close();
+  }
+});

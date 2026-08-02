@@ -17,3 +17,13 @@ export type DnsRecord = {
 };
 
 export type DnsRecordInput = Omit<DnsRecord, "id" | "zoneId">;
+
+export type Certificate = {
+  id: string;
+  zoneId: string;
+  hosts: string;
+  authority: string;
+  type: string;
+  status: "Active" | "Issuing";
+  expires: string;
+};

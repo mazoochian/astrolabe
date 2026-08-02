@@ -1,31 +1,57 @@
 import { BadgeCheck, Lock, RefreshCw, ShieldCheck, Sparkles } from "lucide-solid";
-import { createSignal, For } from "solid-js";
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { PageHeader } from "~/components/page-header";
 import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { certificates, type Certificate } from "~/lib/mock-data";
+import type { Certificate, Zone } from "~/lib/domain";
 import { cn } from "~/lib/utils";
 
 export default function TlsPage() {
-  const [certs, setCerts] = createSignal<Certificate[]>(certificates);
+  const [certs, setCerts] = createSignal<Certificate[]>([]);
+  const [zone, setZone] = createSignal<Zone | null>(null);
   const [host, setHost] = createSignal("");
   const [minTls, setMinTls] = createSignal("1.2");
+  const [loading, setLoading] = createSignal(true);
+  const [issuing, setIssuing] = createSignal(false);
+  const [error, setError] = createSignal("");
+  const activeCount = createMemo(() => certs().filter((cert) => cert.status === "Active").length);
 
-  const issue = () => {
-    if (!host().trim()) return;
-    setCerts((c) => [
-      {
-        id: crypto.randomUUID(),
-        hosts: host().trim(),
-        authority: "Let's Encrypt",
-        type: "Universal",
-        status: "Issuing",
-        expires: "—",
-      },
-      ...c,
-    ]);
-    setHost("");
+  onMount(async () => {
+    try {
+      const zoneData = await request<{ zones: Zone[] }>("/api/zones");
+      const activeZone = zoneData.zones[0];
+      if (!activeZone) throw new Error("No TLS zone is available.");
+      setZone(activeZone);
+      const data = await request<{ certificates: Certificate[] }>(
+        `/api/tls?zoneId=${encodeURIComponent(activeZone.id)}`,
+      );
+      setCerts(data.certificates);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load certificates.");
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  const issue = async () => {
+    const activeZone = zone();
+    if (!activeZone || !host().trim()) return;
+    setError("");
+    setIssuing(true);
+    try {
+      const data = await request<{ certificate: Certificate }>("/api/tls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zoneId: activeZone.id, hosts: host().trim() }),
+      });
+      setCerts((certificates) => [data.certificate, ...certificates]);
+      setHost("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to issue the certificate.");
+    } finally {
+      setIssuing(false);
+    }
   };
 
   return (
@@ -44,7 +70,12 @@ export default function TlsPage() {
       <div class="grid gap-5 lg:grid-cols-3">
         <For
           each={[
-            { icon: ShieldCheck, label: "Active certificates", value: "2", tone: "text-success" },
+            {
+              icon: ShieldCheck,
+              label: "Active certificates",
+              value: String(activeCount()),
+              tone: "text-success",
+            },
             { icon: RefreshCw, label: "Auto-renewals this year", value: "11", tone: "text-info" },
             { icon: Lock, label: "HTTPS traffic", value: "99.4%", tone: "text-primary" },
           ]}
@@ -63,6 +94,10 @@ export default function TlsPage() {
         </For>
       </div>
 
+      <Show when={error()}>
+        <div class="neo-inset rounded-xl px-4 py-3 text-sm text-destructive">{error()}</div>
+      </Show>
+
       <Card class="p-6">
         <div class="flex items-center gap-2">
           <Sparkles class="size-4 text-accent" />
@@ -77,13 +112,19 @@ export default function TlsPage() {
               value={host()}
               onInput={(e) => setHost(e.currentTarget.value)}
               placeholder="hostname, e.g. shop.astrolabe.io"
+              disabled={issuing()}
             />
           </div>
-          <Button onClick={issue}>Issue certificate</Button>
+          <Button onClick={issue} disabled={issuing() || !zone()}>
+            {issuing() ? "Issuing…" : "Issue certificate"}
+          </Button>
         </div>
       </Card>
 
       <Card class="overflow-hidden">
+        <Show when={loading()}>
+          <div class="py-8 text-center text-sm text-muted-foreground">Loading certificates…</div>
+        </Show>
         <table class="w-full border-collapse">
           <thead>
             <tr class="text-left text-[0.7rem] uppercase tracking-widest text-muted-foreground">
@@ -145,4 +186,11 @@ export default function TlsPage() {
       </Card>
     </>
   );
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(data.error ?? "The request failed.");
+  return data;
 }
